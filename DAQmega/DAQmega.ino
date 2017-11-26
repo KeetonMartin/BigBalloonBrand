@@ -25,14 +25,16 @@
 #include <Wire.h>
 //for I2C maybe
 
-int ALTITUDE;
+int ALTITUDE = 100;
 int NUMSATS;
-int pressure;
+double pressure = 1000; // in HectoPascals
 //final variables for cutdown
-const int CUTPRESSURE = 800;
+const int CUTPRESSURE = 13.545;
 const int CUTALTITUDE = 60000;
-const int MINAIRMINUTES = 60;
-const int MAXAIRMINUTES = 120;
+const int MINAIRMINUTES = 90;
+const int MAXAIRMINUTES = 150;
+
+int burnPin = 6;
 
 void setup() {
   // put your setup code here, to run once:
@@ -46,7 +48,7 @@ void setup() {
   digitalWrite(tomDig, HIGH);
 
   //for GPS
-  gpsSerial.begin(9600);
+  gpsSerial.begin(4800);
 
   Serial.println("Initializing the system... Local Time: ");
   //  Serial.print("Time (Pacific): "); Serial.print((gps.time.hour())-7);
@@ -55,33 +57,39 @@ void setup() {
   int MINUTE = gps.time.minute();
   Serial.println(String(HOUR) + ":" + String(MINUTE));
 
-  Wire.begin();        // join i2c bus (address optional for master)
+  pinMode(burnPin, OUTPUT);
+  //Wire.begin();        // join i2c bus (address optional for master)
 }
 
 void loop() {
   //EVERY 30 SECONDS PRINT OUT A BUNCH OF DATA ON NON GPS STUFF
-  if(((millis())/1000)%30 == 0)
+  burnBabyBurn();
+  if((((millis())/1000)%60) -5 <= 0)
   {
     //Print Temperature
     int reading0 = analogRead(sensorPin0);  
     Serial.println(voltToTemperature(reading0));
 
     //print pressure value (around 500)
-    pressure = analogRead(pressurePin);
-    Serial.print("Pressure: ");
-    Serial.println(pressure);
+    int pressureVoltage = analogRead(pressurePin);
+    Serial.print("Pressure voltage: ");
+    Serial.println(pressureVoltage);
+
+    //print pressure in hectopascals
+    pressure = 2.52*pressureVoltage - 257;
+    Serial.println("Pressure: (HectoPascals)" + String(pressure));    
 
     //print ozone reading (around 900 in the lab)
     int ozone = analogRead(ozonePin);
-    Serial.println(String(ozone) + "<-- Ozone Reading");
+    Serial.println(String(ozone) + "<-- Methane Reading");
     prev = millis();
     gpsWorks = false;
 
     //get data from other arduino
-    printFromUno();
+    //printFromUno();
+
     
   }
-  //EVERY 30 SECONDS (OFFSET BY 15) PRINT GPS DATA IF YOU CAN!
   else
   {
     //Print GPS info
@@ -90,11 +98,12 @@ void loop() {
        if (gps.encode(gpsSerial.read()))
        {
           displayGPS();
-          gpsWorks = true;
+          delay(1000);
        }
     }
   }
-  
+  //EVERY 30 SECONDS (OFFSET BY 15) PRINT GPS DATA IF YOU CAN!
+
   //old
 //  if(millis() > prev + DELAY || gpsWorks) {
 //    //Print Temperature
@@ -128,36 +137,39 @@ void burnBabyBurn()
 {
   if(MAXAIRMINUTES <= (millis()/1000)/60)
   {
-    //cut
+    digitalWrite(burnPin,HIGH);
+    Serial.println("We should be on fire, too long in the air");
   }
   else if(
     MINAIRMINUTES < (millis()/1000)/60 &&
     CUTPRESSURE > pressure &&
-    CUTALTITUDE < ALTITUDE)
+    CUTALTITUDE < ALTITUDE
+    )
   {
-    //cut
+    digitalWrite(burnPin,HIGH);
+    Serial.println("We should be on fire, other reasons");
   }
   //otherwise don't cut yet!
 }
 
-//method to read from uno
-void printFromUno()
-{
-Wire.requestFrom(8, 6);    // request 6 bytes from slave device #8
-
-  while (Wire.available()) 
-  { // slave may send less than requested
-    char c = Wire.read(); // receive a byte as character
-    Serial.print(c);         // print the character
-  }
-
-  delay(500);
-}
+////method to read from uno
+//void printFromUno()
+//{
+//Wire.requestFrom(8, 6);    // request 6 bytes from slave device #8
+//
+//  while (Wire.available()) 
+//  { // slave may send less than requested
+//    char c = Wire.read(); // receive a byte as character
+//    Serial.print(c);         // print the character
+//  }
+//
+//  delay(500);
+//}
 
 void displayGPS()
 {
-  if((((millis())/1000)+15)%30 == 0)
-  {
+  //if((((millis())/1000)%60)-10 >= 0)
+  //{
     //line 1
 //  Serial.print("Satellites Connected: "); Serial.println(gps.satellites.value());
   NUMSATS = gps.satellites.value();
@@ -178,7 +190,7 @@ void displayGPS()
   }
   else
   {
-    //Serial.print(F("INVALID"));
+    Serial.print(F("INVALID"));
   }
 
   //line 4
@@ -186,7 +198,7 @@ void displayGPS()
   int HOUR = gps.time.hour()-8;
 //  Serial.print(":"); Serial.println(gps.time.minute());
   int MINUTE = gps.time.minute();
-  //Serial.println("Time: " + String(HOUR) + ":" + String(MINUTE));
+  Serial.println("Time: " + String(HOUR) + ":" + String(MINUTE));
 
   //Serial.print(HOUR); Serial.print(","); Serial.print(MINUTE); Serial.print(","); Serial.print(TEMPDHT); Serial.print(","); Serial.print(TEMPTHERM); 
   //Serial.print(","); Serial.print(HUMIDITY); Serial.print(","); Serial.print(ALTITUDE); Serial.print(","); Serial.print(LAT); Serial.print(",");
@@ -196,7 +208,7 @@ void displayGPS()
   //Serial.println(NUMSATS);
   
 //  delay(10000);
-  }
+  //}
 }
 
 String voltToTemperature(int volt) 
@@ -224,19 +236,19 @@ double equation(double varResistance)
   return pow (2.71, ((-1*varResistance + 33009)/7004));
 }
 
-void send(String message) 
-{
-  //Turn on transmit mode
-  digitalWrite(3, HIGH);
-  delay(10);
-  String s = START_FILTER + message + END_FILTER;
-
-  //Send message multiple times so it definetly receives
-  for (int i = 0; i < 10; i += 1) {
-     Serial.print(s);
-  }
-  //Turn off transmit mode
-  delay(10);
-  digitalWrite(3, LOW);
-  delay(10);
-}
+//void send(String message) 
+//{
+//  //Turn on transmit mode
+//  digitalWrite(3, HIGH);
+//  delay(10);
+//  String s = START_FILTER + message + END_FILTER;
+//
+//  //Send message multiple times so it definetly receives
+//  for (int i = 0; i < 10; i += 1) {
+//     Serial.print(s);
+//  }
+//  //Turn off transmit mode
+//  delay(10);
+//  digitalWrite(3, LOW);
+//  delay(10);
+//}
